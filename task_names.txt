@@ -1,0 +1,1 @@
+'mnli', 'mnli-mm', 'agnews', 'yahoo', 'yelp-polarity', 'yelp-full', 'xstance-de', 'xstance-fr', 'xstance', 'wic', 'rte', 'cb', 'wsc', 'boolq', 'copa', 'multirc', 'record', 'ax-g', 'ax-b'
