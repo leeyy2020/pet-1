@@ -470,17 +470,41 @@ class TransformerModelWrapper:
             inputs['token_type_ids'] = batch['token_type_ids']
         return inputs
 
+    def contrastive_loss(self, sentence_embedding, label):
+        batch_num = len(sentence_embedding)
+        criterion = nn.CrossEntropyLoss()
+        cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
+        loss = 0
+        for i in range(batch_num):
+            for j in range(batch_num):
+                sim = cos_sim(sentence_embedding[i], sentence_embedding[j])
+                # logit_sim = torch.tensor([(1 - sim) * 50, (1 + sim) * 50])
+                sim = sim.unsqueeze(0)
+                logit_sim = torch.cat(((1 - sim) * 50, (1 + sim) * 50),dim=-1)
+                if label[i] == label[j]:
+                    loss += criterion(logit_sim.view(-1, logit_sim.size(-1)), (torch.tensor(1, device='cuda:0').view(-1)))
+                else:
+                    loss += criterion(logit_sim.view(-1, logit_sim.size(-1)), (torch.tensor(0, device='cuda:0').view(-1)))
+        loss = loss / (batch_num * batch_num - batch_num)
+        loss = loss / 100
+        return loss
+
     def mlm_train_step(self, labeled_batch: Dict[str, torch.Tensor],
                        unlabeled_batch: Optional[Dict[str, torch.Tensor]] = None, lm_training: bool = False,
                        alpha: float = 0, **_) -> torch.Tensor:
         """Perform a MLM training step."""
-
+        # logger.info("调用mlm_train_step")
         inputs = self.generate_default_inputs(labeled_batch)
         mlm_labels, labels = labeled_batch['mlm_labels'], labeled_batch['labels']
 
         outputs = self.model(**inputs)
         prediction_scores = self.preprocessor.pvp.convert_mlm_logits_to_cls_logits(mlm_labels, outputs[0])
+
+        con_loss = self.contrastive_loss(prediction_scores, labels)
+        # logger.info(con_loss)
         loss = nn.CrossEntropyLoss()(prediction_scores.view(-1, len(self.config.label_list)), labels.view(-1))
+
+        loss = loss + alpha * con_loss
 
         if lm_training:
             lm_inputs = self.generate_default_inputs(unlabeled_batch)
@@ -491,7 +515,7 @@ class TransformerModelWrapper:
 
     def plm_train_step(self, labeled_batch: Dict[str, torch.Tensor], lm_training: bool = False, **_):
         """Perform a PLM training step."""
-
+        logger.info("调用plm_train_step")
         inputs = self.generate_default_inputs(labeled_batch)
         inputs['perm_mask'], inputs['target_mapping'] = labeled_batch['perm_mask'], labeled_batch['target_mapping']
         labels = labeled_batch['labels']
@@ -507,7 +531,7 @@ class TransformerModelWrapper:
     def sequence_classifier_train_step(self, batch: Dict[str, torch.Tensor], use_logits: bool = False,
                                        temperature: float = 1, **_) -> torch.Tensor:
         """Perform a sequence classifier training step."""
-
+        logger.info("调用sc_train_step")
         inputs = self.generate_default_inputs(batch)
         if not use_logits:
             inputs['labels'] = batch['labels']
